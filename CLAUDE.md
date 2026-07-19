@@ -4,11 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-UrBizia — PlanSan Mobile is a single-file Progressive Web App (PWA) for surveying public toilets in the field ("constat terrain des toilettes publiques"). It's the mobile companion to a desktop app called "PlanSan" — mobile confirms/edits/reports toilets on a map; desktop is the authoritative source for the base dataset. There is no build step, no package.json, and no test suite: the entire app is `index.html`, served as a static file.
+PointSan Mobile is a single-file Progressive Web App (PWA) for surveying public toilets in the field ("constat terrain des toilettes publiques"). It's the mobile companion to a desktop app called "PointSan" — mobile confirms/edits/reports toilets on a map; desktop is the authoritative source for the base dataset. There is no build step, no package.json, and no test suite: the entire app is `index.html`, served as a static file.
 
 ## Files
 
-- `index.html` — the whole application: CSS, embedded seed data, and all JS in inline `<style>`/`<script>` tags. ~1100 lines but one line (~2.9MB) is `MAP_DATA_TOI`, a giant embedded array literal of toilet records, and another (~35KB) is a base64-encoded logo (`LOGO_B64`). Don't try to eyeball those lines in an editor — use `grep`/`sed`/targeted `Read` offsets instead of opening the whole file.
+- `index.html` — the whole application: CSS, embedded seed data, and all JS in inline `<style>`/`<script>` tags. ~1100 lines but one line (~2.9MB) is `MAP_DATA_TOI`, a giant embedded array literal of toilet records, and another (~35KB) is a base64-encoded logo embedded directly in the welcome-screen `<img>` tag. Don't try to eyeball those lines in an editor — use `grep`/`sed`/targeted `Read` offsets instead of opening the whole file.
 - `sw.js` — service worker: cache-first for same-origin app-shell files, network-first (with cache fallback) for everything else (map tiles, CDN assets).
 - `manifest.json` — PWA manifest (name, icons, theme colors, `display: standalone`).
 - `icon-*.png` — app icons.
@@ -32,7 +32,7 @@ There is no lint/test/build command — verify changes by loading the page in a 
 Everything lives in one global script scope in `index.html`. Key pieces, in the order they appear in the file:
 
 **Data model** (three sources of toilet points, merged at render time):
-- `MAP_DATA_TOI` — the base dataset seeded from PlanSan desktop. Each row is a positional array: `[nom, adresse, ville, dep, region, operateur, verif, auto, pmr, lat, lon, refId]`. `verif` is one of `'v'` (Vérifiée/Gouv+OSM), `'g'` (Gouv only), `'o'` (OSM only) — see `V_COLORS`/`V_LABELS`.
+- `MAP_DATA_TOI` — the base dataset seeded from PointSan desktop. Each row is a positional array: `[nom, adresse, ville, dep, region, operateur, verif, auto, pmr, lat, lon, refId]`. `verif` is one of `'v'` (Vérifiée/Gouv+OSM), `'g'` (Gouv only), `'o'` (OSM only) — see `V_COLORS`/`V_LABELS`.
 - `ANNOTATIONS` — a `{ [refId]: {...} }` map of local edits/overrides layered on top of a `MAP_DATA_TOI` row (position override, type, rating, photos, deletion state, etc). Never mutates the base row directly.
 - `NEW_POINTS` — an array of user-reported toilets that don't exist in the base dataset at all (`id` starts with `NEW-`).
 
@@ -53,10 +53,11 @@ Everything lives in one global script scope in `index.html`. Key pieces, in the 
 - `pushDirty()` uploads photos then upserts rows into `toilette_annotations` / `new_points` tables (`Prefer: resolution=merge-duplicates`).
 - `pullAll()` fetches all rows from those tables, skipping any ref that's still locally dirty (so an unsent local edit is never clobbered by a stale server read).
 - `syncNow(silent)` runs push then pull and re-renders; called once silently on startup and again from the menu's "Synchroniser maintenant" button.
-- `refreshBaseFromServer()` is a separate, one-way operation: paginates through a `toilettes_base` table published by PlanSan desktop and replaces `MAP_DATA_TOI` wholesale — this is how the mobile app picks up new base data without an app update.
-- There is no auth/login — sync is anonymous and shared across all installs of the app pointing at the same Supabase project.
+- `refreshBaseFromServer()` is a separate, one-way operation: paginates through a `toilettes_base` table published by PointSan desktop and replaces `MAP_DATA_TOI` wholesale — this is how the mobile app picks up new base data without an app update.
+- Writes to `toilette_annotations`/`new_points` are intentionally open to anyone with the anon key (no login) — field reports are meant to be crowdsourced. The five `*_base` reference tables (`toilettes_base`, `jeux_base`, `sites_base`, `aires_base`, `epci_base`) are read-only from Mobile's perspective: their `SELECT` policy is public, but `INSERT`/`UPDATE`/`DELETE` are restricted to authenticated collaborators via a Postgres `collaborators` allow-list table — only PointSan desktop (with its login screen) can write to them.
+- There is no auth/login in Mobile itself — sync of field reports is anonymous and shared across all installs of the app pointing at the same Supabase project.
 
-**Local export/import** (`exportAnnotations`/`importAnnotations`): a JSON file (`{ type, version, annotations, newPoints }`) downloaded/uploaded as an offline fallback and as the interchange format with PlanSan desktop. Import skips annotations whose `refId` isn't found in the current `MAP_DATA_TOI` and marks everything else dirty so it also gets pushed to Supabase on next sync.
+**Local export/import** (`exportAnnotations`/`importAnnotations`): a JSON file (`{ type, version, annotations, newPoints }`) downloaded/uploaded as an offline fallback and as the interchange format with PointSan desktop. Import skips annotations whose `refId` isn't found in the current `MAP_DATA_TOI` and marks everything else dirty so it also gets pushed to Supabase on next sync.
 
 **Startup flow**: welcome overlay → `locateOnStartup()` requests geolocation and zooms to a 500m bbox around the user (falls back to the default France-wide view if denied/unavailable) → `buildLayers()` → silent `syncNow(true)`.
 
